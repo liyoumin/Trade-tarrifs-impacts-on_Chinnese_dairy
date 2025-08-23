@@ -1,6 +1,6 @@
 Data and Period Definitions
 
-Using the provided dataset of U.S. dairy exports to China (monthly data), we segmented the timeline into four key policy phases and computed monthly price and quantity outcomes for each:
+we segmented the timeline into four key policy phases and computed monthly price and quantity outcomes for each:
   Control (Baseline): June 2018 – This single month represents the immediate pre-trade-war baseline (just before retaliatory tariffs fully took hold).
   Trade War: July 2018 – June 2019, covering roughly the first year of the U.S.–China trade war when retaliatory tariffs on U.S. dairy were in effect.
   COVID: June 2020 – June 2021, capturing the first year of the COVID-19 pandemic. Notably, this period followed the Phase One trade deal (signed Jan 2020) when China began tariff exclusions for U.S. dairy products,    significantly lowering effective tariffs by March 2020 apps.fas.usda.gov.
@@ -91,3 +91,4 @@ oecd.org. For stakeholders, these findings underscore the importance of trade po
 Sources: The analysis is based on the provided dataset of U.S. dairy export values/quantities and external information on U.S.–China tariff changes and dairy market trends for context. Key references include USDEC reports on tariff impacts usdec.org, USDA/FAS trade reports on the Phase One tariff exclusions apps.fas.usda.gov, and FAO/OECD market assessments on dairy price trends oecd.org. These sources corroborate the quantitative findings from the data.
 <img width="903" height="677" alt="image" src="https://github.com/user-attachments/assets/aa0b57f8-6314-42ff-a439-4f55e149d0f3" />
 <img width="777" height="199" alt="image" src="https://github.com/user-attachments/assets/0fad679b-bb91-477a-914d-39efa3e3db16" />
+<"https://chatgpt.com/s/dr_68a90c086d548191acc3fde0c7e53d80" />
