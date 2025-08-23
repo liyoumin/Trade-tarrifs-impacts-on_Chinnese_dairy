@@ -91,4 +91,4 @@ oecd.org. For stakeholders, these findings underscore the importance of trade po
 Sources: The analysis is based on the provided dataset of U.S. dairy export values/quantities and external information on U.S.–China tariff changes and dairy market trends for context. Key references include USDEC reports on tariff impacts usdec.org, USDA/FAS trade reports on the Phase One tariff exclusions apps.fas.usda.gov, and FAO/OECD market assessments on dairy price trends oecd.org. These sources corroborate the quantitative findings from the data.
 <img width="903" height="677" alt="image" src="https://github.com/user-attachments/assets/aa0b57f8-6314-42ff-a439-4f55e149d0f3" />
 <img width="777" height="199" alt="image" src="https://github.com/user-attachments/assets/0fad679b-bb91-477a-914d-39efa3e3db16" />
-<"https://chatgpt.com/s/dr_68a90c086d548191acc3fde0c7e53d80" />
+
