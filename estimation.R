@@ -17,6 +17,7 @@ library(modelsummary)
 library(glue)
 install.packages("did")
 library(did)
+library(forcats)
 setwd("/Users/macpro/Desktop/Youmin-phd/research/Dairy and Alfalfa/China Figure")
 
 ###load
@@ -73,16 +74,27 @@ write_csv(clean_df,"clean_df.csv")
 clean_df <- clean_df %>%
   mutate(
     TRd   = (tariff_rate_on_dairy/100) * dairy_value_usd,
-    TRa = (tariff_rate_on_alfalfa/100) * feed_value_usd
+    TRa = (tariff_rate_on_alfalfa/100) * value_usd_thousand
   )
 
-annual_revenue <- clean_df %>%
-  group_by(year) %>%
-  summarise(
-    dairy_tariff_revenue   = sum(TRd, na.rm = TRUE),
-    alfalfa_tariff_revenue = sum(TRa, na.rm = TRUE)
-  )
-print(annual_revenue)
+ggplot(clean_df, aes(date.x, TRd)) +
+    geom_line() +
+    geom_vline(xintercept = c(2018, 2019, 2022, 2024), linetype = "dotted") +
+  scale_x_date(limits = c(as.Date("2010-01-01"), NA)) +  
+  labs(title = "China tariff revenue on U.S. dairy (2010–2025)",
+         y = "Tariff revenue on dairy (Thousand USD)", x = "Year") +
+    theme_minimal() 
+
+###co-variance
+vars <- clean_df[, c("alfalfa_price_usd_ton", "dairy_usd_per_kg", "tariff_rate_on_alfalfa",
+                     "tariff_rate_on_dairy", "dairy_qty_ton", "qty_ton", "TRd", "TRa")]
+cov_matrix <- cov(vars, use = "complete.obs")
+cor_matrix <- cor(vars, use = "complete.obs")
+cov_matrix
+cor_matrix
+
+ancova_model <- aov(dairy_usd_per_kg ~ factor(tariff_rate_on_alfalfa) + alfalfa_price_usd_ton, data = clean_df)
+summary(ancova_model)
 
 ###.   2) estimation model
 clean_df <- clean_df %>%
@@ -112,7 +124,7 @@ clean_df <- clean_df %>%
     month_fe  = factor(month), year_fe   = factor(year)
   )
 
-K <- 3
+K <- 2
 
 ### panel data id
 df_est <- clean_df %>%
@@ -125,33 +137,37 @@ df_est <- clean_df %>%
 
 
 ### (A) Pass-through: alfalfa tariff -> feed costs
-m1 <- feols(d_ln_alf ~ f(d_tra,0:K) + f(d_ln_feed,0:K) +
-              f(d_aqty,0:K) + f(d_TRa,0:K) +
-              i(month_fe) + i(year_fe), 
+m1 <- feols(ln_alf ~ f(d_tra,0:K) + f(d_trd,0:K) + f(ln_dqty, 0:K) +
+             i(month_fe, "6") + i(year_fe),
             data = df_est,
             panel.id = ~ unit_id + time_idx
             )
 summ_m1 <- summary(m1, vcov = NW(4))
 summ_m1
+
 ##set na as 0
 vars <- c("d_milkp", "-lag(ln_milkp)")
 df_est <- df_est %>% mutate(across(all_of(vars), ~ replace_na(., 0)))
 df_est <- df_est %>% mutate(across(where(is.numeric), ~ replace(., is.na(.) & row_number() == 1, 0)))
 
 # (B) Milk price: feed & dairy tariff
+ln_dair ~ regressors | month_fe + year_fe
+
 m2 <- feols(
-  d_ln_dair ~ f(d_ln_alf, 0:K) + f(d_trd, 0:K) + f(d_tra, 0:K) + f(d_aqty, 0:K) + 
-    f(d_ln_feed, 0:K) + f(d_dqty, 0:K) + f(d_milkp, 0:K)  + 
-    i(month_fe) + i(year_fe),
+  ln_dair ~ f(ln_alf, 0:K) + f(d_trd, 0:K) + f(d_tra, 0:K) + f(ln_aqty, 0:K) + 
+    f(ln_feed, 0:K) + f(ln_dqty, 0:K) + f(d_milkp, 0:K) | 
+    month_fe + year_fe,
   data = df_est,
   panel.id = ~ unit_id + time_idx
   )
+
 summ_m2 <- summary(m2, vcov = NW(4))
 summ_m2
+fixef(m2)$month_fe
 
 # IV: instrument feed dynamics with alfalfa tariff/world price
 m2_iv <- feols(
-     d_ln_dair ~ f(d_trd,0:K) + f(d_dqty, 0:K) + f(d_milkp,0:K) + f(d_TRd,0:K) + i(month_fe) + i(year_fe) |
+     d_ln_dair ~ f(d_trd,0:K) + f(d_dqty, 0:K) + f(d_milkp,0:K) + f(d_TRd,0:K) + i(month_fe, ref = "6") + i(year_fe, ref = "2018")|
       f(d_ln_alf,0:K) ~ f(d_tra,0:K) + f(d_ln_feed,0:K) + f(d_aqty,0:K) + f(d_TRa,0:K),
      data = df_est,
      panel.id = ~ unit_id + time_idx
@@ -160,40 +176,46 @@ m2_iv <- feols(
 etable(m1, m2, m2_iv, se = "hetero", depvar = TRUE)
 
 # (C) import qty
-m3 <- feols(d_dqty ~ f(d_trd, 0:K) + f(d_ln_feed, 0:K) + 
-            f(d_aqty, 0:K) + f(d_milkp,0:K) +
-            i(month_fe) + i(year_fe),
+m3 <- feols(ln_dqty ~ f(d_trd, 0:K) + f(ln_dair, 0:K) + f(d_tra,0:K) +
+            f(ln_alf, 0:K) + f(d_milkp,0:K) +
+            i(month_fe, ref = "6") + i(year_fe),
             data = df_est,
             panel.id = ~ unit_id + time_idx
 ) 
 
-summ_m5 <- summary(m5, vcov = NW(4))
-summ_m5
+summ_m3 <- summary(m3, vcov = NW(4))
+summ_m3
 # D) world price shift
-m4 <- feols(d_milkp ~ f(d_trd,0:K) + f(d_tra,0:K) + f(d_ln_alf,0:K) + f(d_ln_dair,0:K) + f(d_faop,0:K) +
-              i(month_fe) + i(year_fe),
+m4 <- feols(d_milkp ~ f(d_trd,0:K) + f(d_tra,0:K) + f(ln_alf,0:K) + f(ln_dair,0:K) + f(ln_aqty,0:K)
+            + f(ln_dqty,0:K) + 
+              i(month_fe, ref = "6") + i(year_fe),
             data = df_est,
             panel.id = ~ unit_id + time_idx
             ) 
+summ_m4 <- summary(m4, vcov = NW(4))
+summ_m4
 
-m5 <- feols(d_faop ~ f(d_trd,0:K) + f(d_tra,0:K) + f(d_ln_alf,0:K) + f(d_ln_dair,0:K) + f(d_milkp,0:K) + f(d_ln_feed,0:K) +
+m5 <- feols(ln_faop ~ f(d_trd,0:K) + f(d_tra,0:K) + f(ln_alf,0:K) + f(ln_dair,0:K) + f(d_milkp,0:K) + f(ln_aqty,0:K) + f(ln_dqty,0:K) +
+              i(month_fe) + i(year_fe, ref = "2018"),
+            data = df_est,
+            panel.id = ~ unit_id + time_idx
+) 
+summ_m5 <- summary(m5, vcov = NW(4))
+summ_m5
+
+m6 <- feols(ln_feed ~ f(ln_alf,0:K) + f(d_tra,0:K) + f(ln_dair,0:K) + f(d_milkp,0:K) + f(ln_faop,0:K) + f(ln_alf,0:K)+
+              i(month_fe) + i(year_fe, ref = "2018"),
+            data = df_est,
+            panel.id = ~ unit_id + time_idx
+) 
+summ_m6 <- summary(m6,vcov = NW(4))
+
+m7 <- feols(ln_aqty ~ f(d_tra,0:K) + f(d_trd,0:K) + f(ln_alf,0:K) + f(ln_dair,0:K) + f(d_milkp,0:K) + f(ln_feed, 0:K) + f(ln_dqty,0:K) +
               i(month_fe) + i(year_fe),
             data = df_est,
             panel.id = ~ unit_id + time_idx
 ) 
-
-m6 <- feols(d_ln_alf ~ f(d_ln_alf,0:K) + f(d_tra,0:K) + f(d_ln_dair,0:K) + f(d_milkp,0:K) + f(d_faop,0:K) +
-              i(month_fe) + i(year_fe),
-            data = df_est,
-            panel.id = ~ unit_id + time_idx
-) 
-
-m7 <- feols(d_aqty ~ f(d_trd,0:K) + f(d_tra,0:K) + f(d_ln_alf,0:K) + f(d_ln_dair,0:K) + f(d_milkp,0:K) + f(d_faop, 0:K) + f(d_ln_feed,0:K) +
-              i(month_fe) + i(year_fe),
-            data = df_est,
-            panel.id = ~ unit_id + time_idx
-) 
-
+summ_m7 <- summary(m7,vcov = NW(4))
 ### longrun effects
 ms_vcov <- function(x) fixest::vcov(x, vcov = "iid")   # or "hetero" once stable
 cum_effect <- function(model, var, vcov_type = "iid") {
@@ -211,6 +233,7 @@ cum_effect <- function(model, var, vcov_type = "iid") {
   z <- if (is.na(se) || se==0) NA_real_ else abs(est/se)
   sprintf("%.3f%s", est, star(z))
 }
+
 lr_row <- tibble::tibble(
   term = "Long-run effect: Dairy tariff block (Σ lags)",
   `(1) Feed price (Δ log)`   = cum_effect(m1, "d_trd"),
@@ -271,7 +294,6 @@ modelsummary(
 )
 
 
-
 ###summary models
 models <- list(
   "(1) Feed cost"      = m1,
@@ -282,26 +304,6 @@ models <- list(
   "(6) Alfalfa import price" = m6,
   "(7) Alfalfa import qty"  = m7
 )
-
-etable(
-  m1, m2, m3, m4, m5, m6, m7,
-  se = "hetero",
-  keep = "d_",
-  drop = "month_fe|year_fe",
-  order = "type",
-  dict = c(
-    "d_trd"     = "Dairy tariff rate",
-    "d_tra"     = "Alfalfa tariff rate",
-    "d_ln_feed" = "Feed price (Δ log)",
-    "d_dqty"    = "Dairy import qty",
-    "d_milkp"   = "Farm-gate milk price",
-    "d_faop"    = "FAO price index",
-    "d_ln_alf"  = "Alfalfa import price"
-  ),
-  title = "Tariff and Feed Effects on Dairy Outcomes",
-  fitstat = c("n","r2","rmse")   # <= safe across versions
-)
-
 
 etable(
   m1, m2, m3, m4, m5, m6, m7,
@@ -329,16 +331,20 @@ etable(
 
 
 ### 4) treatment effects DID
-control_start <- as.Date("2017-06-01"); control_end <- as.Date("2018-06-01")
-war_start     <- as.Date("2018-06-01"); war_end     <- as.Date("2019-06-01")
+control_start <- as.Date("2017-05-01"); control_end <- as.Date("2018-06-01")
+war_start     <- as.Date("2018-06-01"); war_end     <- as.Date("2020-02-01")
+covid_start   <- as.Date("2020-03-01"); covid_end   <- as.Date("2022-03-01")
 adj_start     <- as.Date("2022-06-01"); adj_end     <- as.Date("2023-06-01")
+war2_start    <- as.Date("2023-08-01"); war2_adj    <- as.Date("2025-06-01")
 
 dft <- df_est %>%
   mutate(
     window = case_when(
-      date.x >= as.Date("2017-06-01") & date.x < as.Date("2018-06-01") ~ "control",
-      date.x >= as.Date("2018-06-01") & date.x < as.Date("2019-06-01") ~ "trade_war",
+      date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-06-01") ~ "control",
+      date.x >= as.Date("2018-06-01") & date.x < as.Date("2020-03-01") ~ "trade_war",
+      date.x >= as.Date("2020-03-01") & date.x < as.Date("2022-03-01") ~ "covid19",
       date.x >= as.Date("2022-06-01") & date.x < as.Date("2023-06-01") ~ "adjust",
+      date.x >= as.Date("2023-08-01") & date.x < as.Date("2025-06-01") ~ "2_trade_war",
       TRUE ~ NA_character_
     )
   ) %>%
@@ -349,6 +355,7 @@ dft <- df_est %>%
     avg_d_ln_pricea = mean(d_ln_alf, na.rm = TRUE),
     avg_d_ln_dqty   = mean(d_dqty, na.rm = TRUE),
     avg_d_ln_aqty   = mean(d_aqty, na.rm = TRUE), 
+    avg_d_ln_milkp   = mean(d_milkp, na.rm = TRUE),
     .groups = "drop"
   )
 
@@ -356,40 +363,193 @@ m_dprice <- feols(avg_d_ln_priced ~ i(window, ref = "control"), data = dft)
 m_dqty   <- feols(avg_d_ln_dqty   ~ i(window, ref = "control"), data = dft)
 m_aprice <- feols(avg_d_ln_pricea ~ i(window, ref = "control"), data = dft)
 m_aqty   <- feols(avg_d_ln_aqty   ~ i(window, ref = "control"), data = dft)
+m_milkp  <- feols(avg_d_ln_milkp ~ i(window, ref = "control"), data = dft)
+m_milkp <- feols(avg_d_ln_milkp ~ i(window, ref = "control"), data = dft)
 
 ##BOX PLOT ATT
 p1 <- ggplot(dft, aes(x = window, y = avg_d_ln_priced)) +
   geom_boxplot() +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(x = NULL, y = "Avg monthly Δ ln(price)", 
-       title = "China imports: average monthly price change by period") +
+  labs(x = NULL, y = "Avg monthly Δ ln(dairy price)", 
+       title = "China imports: average dairy monthly price change by period") +
   theme_minimal(base_size = 12)
+p1 <- p1 + stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red")
+print(p1)
 
 p2 <- ggplot(dft, aes(x = window, y = avg_d_ln_dqty)) +
   geom_boxplot() +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(x = NULL, y = "Avg monthly Δ ln(quantity)",
-       title = "China imports: average monthly quantity change by period") +
+  labs(x = NULL, y = "Avg monthly Δ ln(dairy quantity)",
+       title = "China imports: average dairy monthly quantity change by period") +
   theme_minimal(base_size = 12)
-print(p1)
 print(p2)
 
 p3 <- ggplot(dft, aes(x = window, y = avg_d_ln_pricea)) +
   geom_boxplot() +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(x = NULL, y = "Avg monthly Δ ln(price)", 
-       title = "China imports: average monthly price change by period") +
+  labs(x = NULL, y = "Avg monthly Δ ln(alfalfa price)", 
+       title = "China imports: average alfalfa monthly price change by period") +
   theme_minimal(base_size = 12)
 
 p4 <- ggplot(dft, aes(x = window, y = avg_d_ln_aqty)) +
   geom_boxplot() +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  labs(x = NULL, y = "Avg monthly Δ ln(quantity)",
-       title = "China imports: average monthly quantity change by period") +
+  labs(x = NULL, y = "Avg monthly Δ ln(alfalfa quantity)",
+       title = "China imports: average monthly alfalfa quantity change by period") +
+  theme_minimal(base_size = 12)
+
+p5 <- ggplot(dft, aes(x = window, y = avg_d_ln_milkp)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = NULL, y = "Farm-gate average monthly Δ ln(milk price)",
+       title = "Chian farm-gate milk price change by period") +
   theme_minimal(base_size = 12)
 
 print(p3)
 print(p4)
+print(p5)
+
+
+###TE
+# --- 1) Choose variables to analyze
+vars <- c("d_ln_dair", "d_ln_alf", "d_dqty", "d_aqty", "d_milkp")
+var_labels <- c(
+  d_ln_dair = "Δ ln(dairy price)",
+  d_ln_alf  = "Δ ln(alfalfa price)",
+  d_dqty    = "Δ ln(dairy quantity)",
+  d_aqty    = "Δ ln(alfalfa quantity)",
+  d_milkp   = "Δ ln(farm-gate milk price)"
+)
+# --- 2) Build month-of-year control baselines (per unit & month-of-year)
+base_long <- df_est %>%
+  dplyr::filter(date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-06-01")) %>%
+  dplyr::mutate(month_lab = factor(lubridate::month(date.x, label = TRUE, abbr = TRUE),
+                                   levels = month.abb)) %>%
+  dplyr::group_by(unit_id, month_lab) %>%
+  dplyr::summarise(dplyr::across(all_of(vars), ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+  tidyr::pivot_longer(cols = all_of(vars), names_to = "var", values_to = "base")
+
+# --- 3) Compute TE (per unit-month) and ATE (mean across units)
+# TE: value - (unit's control-period mean for same month-of-year)
+add_window <- function(df){
+  df %>%
+    dplyr::mutate(
+      window = dplyr::case_when(
+        date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-06-01") ~ "control",
+        date.x >= as.Date("2018-06-01") & date.x < as.Date("2020-03-01") ~ "trade_war",
+        date.x >= as.Date("2020-03-01") & date.x < as.Date("2022-03-01") ~ "covid19",
+        date.x >= as.Date("2022-06-01") & date.x < as.Date("2023-06-01") ~ "adjust",
+        date.x >= as.Date("2023-08-01") & date.x < as.Date("2025-06-01") ~ "war2",
+        TRUE ~ NA_character_
+      ),
+      month_lab = factor(lubridate::month(date.x, label = TRUE, abbr = TRUE),
+                         levels = month.abb)
+    ) %>%
+    dplyr::filter(!is.na(window)) %>%
+    dplyr::mutate(window = factor(
+      window,
+      levels = c("control","trade_war","covid19","adjust","war2"),
+      labels = c("Control (2017-05–2018-05)",
+                 "Trade War (2018-06–2020-02)",
+                 "COVID-19 (2020-03–2022-02)",
+                 "Adjustment (2022-06–2023-05)",
+                 "2nd Trade War (2023-08–2025-05)")
+    ))
+}
+
+control_lab <- "Control (2017-05–2018-05)"
+
+# ATE: mean TE across units (+ SE and 95% CI)
+df_eff <- df_est %>%
+  add_window() %>%
+  dplyr::select(unit_id, window, month_lab, dplyr::all_of(vars)) %>%
+  tidyr::pivot_longer(dplyr::all_of(vars), names_to = "var", values_to = "value") %>%
+  dplyr::left_join(base_long, by = c("unit_id","month_lab","var")) %>%
+  dplyr::mutate(TE = ifelse(window == control_lab, value, value - base)) %>%
+  dplyr::filter(window == control_lab | !is.na(base))
+
+df_te <- df_eff %>%
+  dplyr::mutate(TE_plot = ifelse(as.character(window) == control_lab, value, TE)) %>%
+  dplyr::group_by(unit_id, window, month_lab, var) %>%
+  dplyr::summarise(TE_plot = mean(TE_plot, na.rm = TRUE), .groups = "drop")
+
+df_ate <- df_te %>%
+  dplyr::group_by(window, month_lab, var) %>%
+  dplyr::summarise(
+    ATE  = mean(TE_plot, na.rm = TRUE),
+    n    = sum(!is.na(TE_plot)),
+    SE   = sd(TE_plot, na.rm = TRUE) / sqrt(pmax(n,1)),
+    CI_lo = ATE - 1.96*SE,
+    CI_hi = ATE + 1.96*SE,
+    .groups = "drop"
+  )
+
+df_mean <- df_te %>%
+  dplyr::group_by(window, var) %>%
+  dplyr::summarise(win_mean = mean(TE_plot, na.rm = TRUE), .groups = "drop")
+
+# --- 4) Plot function: boxplots (TE) + ATE points with 95% CI
+plot_TE_ATE <- function(var_code){
+  te_dat   <- dplyr::filter(df_te,  var == var_code)
+  ate_dat  <- dplyr::filter(df_ate, var == var_code)
+  win_mean <- dplyr::filter(df_mean, var == var_code)
+  y_lab    <- var_labels[[var_code]]
+  
+  ggplot() +
+    geom_boxplot(
+      data = te_dat,
+      aes(x = month_lab, y = TE_plot),
+      outlier.alpha = 0.3, width = 0.75
+    ) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_hline(
+      data = win_mean,
+      aes(yintercept = win_mean),
+      linewidth = 0.6
+    ) +
+    geom_line(
+      data = ate_dat,
+      aes(x = month_lab, y = ATE, group = 1),
+      linewidth = 0.5
+    ) +
+    geom_errorbar(
+      data = ate_dat,
+      aes(x = month_lab, ymin = CI_lo, ymax = CI_hi),
+      width = 0.2
+    ) +
+    geom_point(
+      data = ate_dat,
+      aes(x = month_lab, y = ATE),
+      shape = 21, size = 2, stroke = 0.6, fill = "white"
+    ) +
+    facet_wrap(~ window, ncol = 2) +
+    labs(
+      x = NULL, y = y_lab,
+      title = paste0("Monthly TE for treated; Actual for control — ", y_lab),
+      subtitle = paste0(
+        "Control facet shows actual values. TE = treatement − control.
+        Solid line = window mean. 95% CI on ATE."
+      )
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(vjust = 0.9),
+      strip.text = element_text(face = "bold")
+    )
+}
+
+p_dair <- plot_TE_ATE("d_ln_dair")
+p_alf  <- plot_TE_ATE("d_ln_alf")
+p_dqty <- plot_TE_ATE("d_dqty")
+p_aqty <- plot_TE_ATE("d_aqty")
+p_milk <- plot_TE_ATE("d_milkp")
+print(p_dair)
+print(p_alf)
+print(p_dqty)
+print(p_aqty)
+print(p_milk)
+ggsave("TE_ATE_dairy_price.png", p_dair, width = 11, height = 6.5, dpi = 300)
 
 
 ### optional) Large-country (ToT) test ===============
