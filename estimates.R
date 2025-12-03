@@ -4,7 +4,7 @@ library(readxl); library(purrr); library(dplyr); library(janitor)
 library(readr)   # for parse_number
 library(ggplot2); library(lubridate); library(fixest) ; library(zoo)
 library(tidyr); library(stringr); library(tidyverse); library(fixest)
-library(modelsummary); library(glue); library(did); library(forcats)
+library(modelsummary); library(glue); library(did); library(forcats); library(forecast)
 setwd("/Users/macpro/Desktop/Youmin-phd/research/Dairy and Alfalfa/China Figure")
 
 ###load
@@ -211,8 +211,6 @@ cor_matrix
 ancova_model <- aov(dairy_usd_per_kg ~ factor(tariff_rate_on_alfalfa) + alfalfa_price_usd_ton, data = clean_df)
 summary(ancova_model)
 
-
-
 ### estimation-------------------------------------------------------------------------------------------------------
 ### data frame
 clean_df <- clean_df %>%
@@ -263,6 +261,61 @@ df_est <- clean_df %>%
   ) %>%
   distinct(unit_id, date.x, .keep_all = TRUE)
 
+### stationary assumption check--------------------
+trend <- df_est %>%
+  group_by(date.x) %>%
+  summarize(
+    qty_ton = mean(qty_ton, na.rm = TRUE)
+  ) %>%
+  arrange(date.x)
+trend_ts <- ts(
+  trend$qty_ton,
+  start = c(year(min(trend$date.x)), month(min(trend$date.x))),
+  frequency = 12
+)
+ts_dates <- trend$date.x
+train_start <- as.Date("2010-01-01")
+train_end   <- as.Date("2016-01-01")
+
+test_start  <- as.Date("2016-01-01")
+test_end    <- as.Date("2018-01-01")
+
+train_idx <- ts_dates >= train_start & ts_dates < train_end
+test_idx  <- ts_dates >= test_start  & ts_dates <= test_end
+
+train_ts <- ts(
+  trend$qty_ton[train_idx],
+  start = c(2010, 1),
+  frequency = 12
+)
+
+test_ts <- ts(
+  trend$qty_ton[test_idx],
+  start = c(2016, 1),
+  frequency = 12
+)
+
+model_train <- auto.arima(train_ts, 
+                          stepwise = FALSE, 
+                          approximation = FALSE,
+                          d = 1,
+                          max.p = 5,
+                          max.q = 5,
+                          allowdrift = TRUE)
+checkresiduals(model_train)
+h_test <- length(test_ts)
+fc_test <- forecast(model_train, h = h_test)
+accuracy(fc_test, test_ts)
+autoplot(train_ts, series = "Train") +
+  autolayer(test_ts, series = "Test") +
+  autolayer(fc_test$mean, series = "Forecast") +
+  scale_colour_manual(
+    values = c("Train" = "black", "Test" = "blue", "Forecast" = "red")
+  ) +
+  ggtitle("ARIMA Forecast: China Imports of U.S. Alfalfa (Train–Test Split)") +
+  xlab("Year") + 
+  ylab("Mean Import Dairy") +
+  theme_bw()
 
 ## 1) absolute effects
 mm0 <- feols(dairy_qty_ton ~ f(tariff_rate_on_dairy, 0:K) + f(dairy_usd_per_kg,0:K) +
