@@ -1,24 +1,14 @@
 ### Estimation of China improt from U.S. monthly dada
 ### library
-library(readxl)
-library(purrr)
-library(dplyr)
-library(janitor)
+library(readxl); library(purrr); library(dplyr); library(janitor)
 library(readr)   # for parse_number
-library(ggplot2)
-library(lubridate)
-library(fixest)  
-library(zoo)
-library(tidyr)
-library(stringr)
-library(tidyverse)
-library(fixest)
-library(modelsummary)
-library(glue)
-library(did)
-library(forcats)
+library(ggplot2); library(lubridate); library(fixest) ;library(zoo)
+library(tidyr); library(stringr); library(tidyverse); library(fixest)
+library(modelsummary); library(glue); library(did); library(forcats)
 setwd("/Users/macpro/Desktop/Youmin-phd/research/Dairy and Alfalfa/China Figure")
 
+save.image(file = "estimation.RData")
+load("estimation.RData")
 ###load
 path <- ("fao-dairy-price-indices-aug.xlsx")
 cn_m <- read.csv("cn_m.csv")
@@ -224,11 +214,16 @@ summary(ancova_model)
 
 ###.   2) estimation model
 clean_df <- clean_df %>%
+  mutate(
+    dairy_usd_per_ton = dairy_usd_per_kg * 1000
+  )
+
+clean_df <- clean_df %>%
   arrange(date.x) %>%
   mutate(
     ln_feed = ifelse(feed_price_usd_ton + 1 > 0, log(feed_price_usd_ton), NA_real_),
     ln_alf =  log(replace_na(alfalfa_price_usd_ton, 0) + 1),
-    ln_dair = ifelse(dairy_usd_per_kg > 0, log(dairy_usd_per_kg), NA_real_),
+    ln_dair = ifelse(dairy_usd_per_ton > 0, log(dairy_usd_per_kg), NA_real_),
     ln_TRa = ifelse(TRa + 1 > 0, log(TRa+1), NA_real_),
     ln_TRd = ifelse(TRd + 1 > 0, log(TRd+1), NA_real_),
     ln_dqty = ifelse(dairy_qty_ton + 1 > 0, log(dairy_qty_ton+1), NA_real_),
@@ -251,6 +246,8 @@ clean_df <- clean_df %>%
     d_ln_dqty = ln_dqty - lag(ln_dqty),
     d_ln_milkp = ln_milkp, - lag(ln_milkp),
     d_ln_faop = ln_faop - lag(ln_faop),
+    d_milkp = farmgate_cny_kg - lag(farmgate_cny_kg),
+    d_milkp_percent = (farmgate_cny_kg - lag(farmgate_cny_kg))/(farmgate_cny_kg),
     month_fe  = factor(month), year_fe   = factor(year)
   )
 K <-2
@@ -264,15 +261,212 @@ df_est <- clean_df %>%
   ) %>%
   distinct(unit_id, date.x, .keep_all = TRUE)
 
+## absolute effects
+mm0 <- feols(dairy_qty_ton ~ f(tariff_rate_on_dairy, 0:K) + f(dairy_usd_per_kg,0:K) +
+               i(month_fe, "6") + i(year_fe),
+             data = df_est,
+             panel.id = ~unit_id + time_idx
+)
+md0 <- feols(qty_ton ~ f(tariff_rate_on_alfalfa, 0:K) + f(alfalfa_price_usd_ton,0:K) +
+               i(month_fe, "6") + i(year_fe),
+             data = df_est,
+             panel.id = ~unit_id + time_idx
+)
+###IV
+iv_mm0 <- feols(
+  farmgate_cny_kg ~ f(tariff_rate_on_dairy, 0:K) + f(dairy_usd_per_kg,0:K) + i(month_fe, "6") + i(year_fe) |
+    f(qty_ton) ~ f(tariff_rate_on_alfalfa, 0:K) + f(alfalfa_price_usd_ton,0:K),
+    data = df_est,
+    panel.id = ~unit_id + time_idx
+)
+
+summary(iv_mm0, se = "hetero")
+etable(mm0, md0, iv_mm0, se = "hetero", depvar = TRUE)
+
+
+rf_mm0 <- feols(
+  farmgate_cny_kg ~ f(tariff_rate_on_alfalfa, 0:K) + f(tariff_rate_on_dairy, 0:K) + f(alfalfa_price_usd_ton,0:K) +  f(dairy_usd_per_kg,0:K) +
+    i(month_fe, "6") + i(year_fe),
+  data = df_est,
+  panel.id = ~unit_id + time_idx
+)
+summary(rf_mm0, se = "hetero")
+
 
 ### (A) Pass-through: alfalfa tariff and price
-m1 <- feols(ln_alf ~ f(ln_tra,0:K) + f(ln_aqty, 0:K) + f(ln_trd,0:K) + f(ln_dqty,0:K) + f(ln_feed,0:K) +
-             i(month_fe, "6") + i(year_fe),
+ma <- feols(ln_aqty ~ f(ln_tra,0:K) + f(ln_alf,0:K) +       
+            i(month_fe, "6") + i(year_fe),
             data = df_est,
             panel.id = ~ unit_id + time_idx
             )
-summ_m1 <- summary(m1, vcov = NW(4))
-summ_m1
+md <- feols(ln_dqty ~ f(ln_trd,0:K)+ f(ln_dair,0:K)+           
+                 i(month_fe, "6") + i(year_fe),
+               data = df_est,
+               panel.id = ~ unit_id + time_idx
+               )
+mm <- feols(ln_milkp ~ f(ln_trd,0:K)+ f(ln_tra,0:K)+ f(ln_dair,0:K)+ f(ln_alf,0:K)+    
+              i(month_fe, "6") + i(year_fe),
+            data = df_est,
+            panel.id = ~ unit_id + time_idx
+)
+summary(mm)
+
+###IV
+iv_mm <- feols(
+  ln_milkp ~ ln_aqty +  f(ln_tra, 0:K) + i(month_fe, "6") + i(year_fe) |
+    ln_dqty ~ f(ln_trd, 0:K) + f(ln_dair,0:K),
+  data = df_est,
+  panel.id = ~unit_id + time_idx
+)
+
+summary(iv_mm, se = "hetero")
+etable(ma, md, iv_mm, se = "hetero", depvar = TRUE)
+### reduce formation
+rf_mm <- feols(
+  ln_milkp ~ f(ln_tra, 0:2) + f(ln_trd, 0:2) +
+    i(month_fe, "6") + i(year_fe),
+  data = df_est,
+  panel.id = ~unit_id + time_idx
+)
+
+rf_mm1 <- feols(
+  d_milkp_per ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) +
+    i(month_fe, "6") + i(year_fe),
+  data = df_est,
+  panel.id = ~unit_id + time_idx
+)
+
+# delta_log model
+ma1 <- feols(d_ln_dqty ~ f(d_ln_trd,0:K) + f(d_ln_dair, 0:K) +  f(d_ln_tra,0:K) +
+              i(month_fe) + i(year_fe),
+            data = df_est,
+            panel.id = ~ unit_id + time_idx
+)
+
+md1 <- feols(d_ln_aqty ~ f(d_ln_tra,0:K) + f(d_ln_alf,0:K) +
+              i(month_fe) + i(year_fe),
+            data = df_est,
+            panel.id = ~ unit_id + time_idx
+)
+
+mm1 <- feols(d_ln_milkp ~ f(d_ln_trd,0:K)+ f(d_ln_tra,0:K) +  f(d_ln_feed,0:K) + f(d_ln_dqty,0:K)+ f(d_ln_alf,0:K)+
+              i(month_fe, "6") + i(year_fe),
+            data = df_est,
+            panel.id = ~ unit_id + time_idx
+)
+summary(mm1)
+
+
+###delta_IV
+iv_mm1 <- feols(
+  f(d_ln_milkp) ~  f(d_ln_aqty,0:K) + f(d_ln_alf, 0:K)+ i(month_fe) + i(year_fe) |
+    f(d_ln_dqty) ~
+    f(d_ln_trd, 0:K) + f(d_ln_tra, 0:K) + f(d_ln_dair,0:K), 
+  data = df_est,
+  panel.id = ~ unit_id + time_idx
+)
+
+summary(iv_mm1, se = "hetero")
+etable(iv_mm1, stage = 1)
+etable(ma1, md1, iv_mm1, se = "hetero", depvar = TRUE)
+
+
+# Extract coefficients
+b_price_on_aqty  <- coef(iv_mm1)["fit_d_ln_aqty"]
+b_price_on_dqty  <- coef(iv_mm1)["fit_d_ln_dqty"]
+
+# First-stage alfalfa qty on tariffs
+fs_a <- tidy(ma1) %>% filter(grepl("f\\(d_ln_alf", term))
+# First-stage dairy qty on tariffs
+fs_d <- tidy(md1) %>% filter(grepl("f\\(d_ln_dair", term))
+
+# Compute marginal effect by lag
+fs_a <- fs_a %>% mutate(effect_on_milk = estimate * b_price_on_aqty)
+fs_d <- fs_d %>% mutate(effect_on_milk = estimate * b_price_on_dqty)
+
+bind_rows(fs_a %>% mutate(tariff="Alfalfa tariff"),
+          fs_d %>% mutate(tariff="Dairy tariff")) %>%
+  select(tariff, term, estimate, effect_on_milk)
+
+
+## sensitive test
+# --- Minimal helpers that work with fixest + sensemakr -----------------------
+library(sensemakr)
+
+# Extract a robust t-stat for a named coefficient from a fixest model
+tstat_fixest <- function(mod, coef_name, se_type = c("hetero","iid","cluster","nw","dk")) {
+  se_type <- match.arg(se_type)
+  ss <- summary(mod, se = se_type)
+  ct <- ss$coeftable
+  if (is.null(ct) || !coef_name %in% rownames(ct)) {
+    stop(sprintf("Coefficient '%s' not found. Available:\n%s",
+                 coef_name, paste(rownames(ct), collapse = ", ")))
+  }
+  unname(ct[coef_name, "t value"])
+}
+
+# Core sensitivity readout for *one* coefficient
+sense_from_fixest <- function(mod, coef_name, se_type = "hetero",
+                              alpha = 0.05, q = 1) {
+  tval <- tstat_fixest(mod, coef_name, se_type = se_type)
+  dof  <- df.residual(mod)  # residual DoF from fixest
+  est  <- unname(coef(mod)[coef_name])
+  
+  # 1) Partial R^2 of treatment with outcome (conditional on included covariates)
+  pr2 <- sensemakr::partial_r2(t = tval, dof = dof)
+  
+  # 2) Robustness value RV_{q,alpha}
+  rv  <- sensemakr::robustness_value(t = tval, dof = dof, q = q, alpha = alpha)
+  
+  list(
+    coef      = coef_name,
+    estimate  = est,
+    t_value   = tval,
+    dof       = dof,
+    partial_R2= pr2,
+    RV_q_alpha= rv,
+    alpha     = alpha,
+    q         = q
+  )
+}
+
+# Convenience: run for all lags of a variable expanded by f(var, 0:K)
+sense_lag_bundle <- function(mod, var, K, se_type = "hetero", alpha = 0.05, q = 1) {
+  coefs <- paste0(var, "::", 0:K)
+  found <- intersect(coefs, names(coef(mod)))
+  if (length(found) == 0L) stop("No matching coefficients found in model.")
+  out <- lapply(found, \(nm) sense_from_fixest(mod, nm, se_type, alpha, q))
+  do.call(rbind, lapply(out, as.data.frame))
+}
+
+# Example: mm1, focus on contemporaneous d_ln_trd (lag 0)
+res_rf_mm1_tra0 <- sense_from_fixest(rf_mm1, coef_name = "f(d_ln_tra, 0)",
+                                  se_type = "hetero", alpha = 0.05, q = 1)
+res_rf_mm1_tra0
+
+sensemakr::partial_r2_from_model(rf_mm1, covariates = "f(d_ln_alf, 0)")
+sensemakr::partial_r2_from_model(rf_mm1, covariates = "f(d_ln_dair, 0)")
+
+res_mm1_trd0$RV_q_alpha
+
+# contemporaneous trade shock
+sense_from_fixest(mm1, "f(d_ln_trd, 0)", se_type = "hetero", q = 1, alpha = 0.05)
+sense_lag_bundle <- function(mod, var_prefix, K, se_type = "hetero", alpha = 0.05, q = 1) {
+  # Construct expected names like f(d_ln_trd, 0), f(d_ln_trd, 1), ...
+  coefs <- paste0("f(", var_prefix, ", ", 0:K, ")")
+  found <- intersect(coefs, names(coef(mod)))
+  if (length(found) == 0L)
+    stop("No matching coefficients found in model. Available:\n",
+         paste(names(coef(mod)), collapse = ", "))
+  
+  out <- lapply(found, function(nm)
+    sense_from_fixest(mod, nm, se_type = se_type, alpha = alpha, q = q))
+  do.call(rbind, lapply(out, as.data.frame))
+}
+
+sense_lag_bundle(mm1, "d_ln_trd", K, se_type = "hetero", q = 1, alpha = 0.05)
+sense_from_fixest(iv_mm1, "fit_d_ln_dqty", se_type = "hetero", q = 1, alpha = 0.05)
+
 
 # (B) Milk price: feed & dairy tariff
 m2 <- feols(d_ln_dair ~ f(d_ln_alf, 0:K) + f(d_ln_trd, 0:K) + f(d_ln_tra, 0:K) + f(d_ln_aqty, 0:K) + f(d_ln_feed, 0:K) + 
@@ -284,16 +478,6 @@ m2 <- feols(d_ln_dair ~ f(d_ln_alf, 0:K) + f(d_ln_trd, 0:K) + f(d_ln_tra, 0:K) +
 
 summ_m2 <- summary(m2, vcov = NW(4))
 summ_m2
-
-# IV: instrument feed dynamics with alfalfa tariff/world price
-m2_iv <- feols(
-     d_ln_dair ~ f(d_trd,0:K) + f(d_ln_dqty, 0:K) + i(month_fe, ref = "6") + i(year_fe, ref = "2018")|
-      f(d_ln_alf,0:K) ~ f(d_tra,0:K) + f(d_ln_feed,0:K) + f(d_ln_aqty,0:K),
-     data = df_est,
-     panel.id = ~ unit_id + time_idx
-   )
-
-etable(m1, m2, m2_iv, se = "hetero", depvar = TRUE)
 
 # (C) import qty
 m3 <- feols(d_ln_dqty ~ f(d_ln_trd, 0:K) + f(d_ln_dair, 0:K) + f(d_ln_tra,0:K) +
@@ -452,18 +636,18 @@ etable(
 
 
 ### 4) treatment effects DID
-control_start <- as.Date("2017-05-01"); control_end <- as.Date("2018-06-01")
-war_start     <- as.Date("2018-06-01"); war_end     <- as.Date("2020-02-01")
-covid_start   <- as.Date("2020-03-01"); covid_end   <- as.Date("2022-12-01")
-war2_start    <- as.Date("2023-01-01"); war2_adj    <- as.Date("2025-06-01")
+control_start <- as.Date("2017-01-01"); control_end <- as.Date("2018-06-01")
+war_start     <- as.Date("2018-06-01"); war_end     <- as.Date("2022-02-01")
+adjust_start   <- as.Date("2022-03-01"); adjust_end   <- as.Date("2023-09-01")
+second_start    <- as.Date("2023-09-01"); secon_end    <- as.Date("2025-06-01")
 
 dft <- df_est %>%
   mutate(
     window = case_when(
-      date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-06-01") ~ "control",
-      date.x >= as.Date("2018-06-01") & date.x < as.Date("2020-03-01") ~ "trade_war",
-      date.x >= as.Date("2020-03-01") & date.x < as.Date("2022-12-01") ~ "covid19",
-      date.x >= as.Date("2023-01-01") & date.x < as.Date("2025-06-01") ~ "2_trade_war",
+      date.x >= as.Date("2017-01-01") & date.x < as.Date("2018-06-01") ~ "control",
+      date.x >= as.Date("2018-06-01") & date.x < as.Date("2020-02-01") ~ "trade_war",
+      date.x >= as.Date("2022-03-01") & date.x < as.Date("2023-09-01") ~ "adjust",
+      date.x >= as.Date("2023-03-01") & date.x < as.Date("2025-06-01") ~ "2_trade_war",
       TRUE ~ NA_character_
     )
   ) %>%
@@ -531,7 +715,7 @@ p5 <- ggplot(dft, aes(x = window, y = avg_d_ln_milkp)) +
 p5 <- p5 + stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red")
 print(p5)
 
-###TE
+###ATE
 # --- 1) Choose variables to analyze
 vars <- c("d_ln_dair", "d_ln_alf", "d_ln_dqty", "d_ln_aqty", "d_ln_milkp")
 var_labels <- c(
@@ -543,7 +727,7 @@ var_labels <- c(
 )
 # --- 2) Build month-of-year control baselines (per unit & month-of-year)
 base_long <- df_est %>%
-  dplyr::filter(date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-06-01")) %>%
+  dplyr::filter(date.x >= as.Date("2017-01-01") & date.x < as.Date("2018-06-01")) %>%
   dplyr::mutate(month_lab = factor(lubridate::month(date.x, label = TRUE, abbr = TRUE),
                                    levels = month.abb)) %>%
   dplyr::group_by(unit_id, month_lab) %>%
@@ -556,10 +740,10 @@ add_window <- function(df){
   df %>%
     dplyr::mutate(
       window = dplyr::case_when(
-        date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-06-01") ~ "control",
-        date.x >= as.Date("2018-06-01") & date.x < as.Date("2020-03-01") ~ "trade_war",
-        date.x >= as.Date("2020-03-01") & date.x < as.Date("2022-12-01") ~ "covid19",
-        date.x >= as.Date("2023-01-01") & date.x < as.Date("2025-06-01") ~ "war2",
+        date.x >= as.Date("2017-05-01") & date.x < as.Date("2018-05-01") ~ "control",
+        date.x >= as.Date("2018-06-01") & date.x < as.Date("2022-06-01") ~ "trade_war",
+        date.x >= as.Date("2022-07-01") & date.x < as.Date("2023-07-01") ~ "adjust",
+        date.x >= as.Date("2023-08-01") & date.x < as.Date("2025-06-01") ~ "war2",
         TRUE ~ NA_character_
       ),
       month_lab = factor(lubridate::month(date.x, label = TRUE, abbr = TRUE),
@@ -568,15 +752,15 @@ add_window <- function(df){
     dplyr::filter(!is.na(window)) %>%
     dplyr::mutate(window = factor(
       window,
-      levels = c("control","trade_war","covid19","war2"),
+      levels = c("control","trade_war","adjust","war2"),
       labels = c("Control (2017-05–2018-05)",
-                 "Trade War (2018-06–2020-02)",
-                 "COVID-19 (2020-03–2022-12)",
-                 "2nd Trade War (2023-01–2025-05)")
+                 "Trade War (2018-06–2022-06)",
+                 "Adjust (2022-07–2023-07)",
+                 "2nd Trade War (2023-07–2025-07)")
     ))
 }
 
-control_lab <- "Control (2017-05–2018-05)"
+control_lab <- "Control (2017-05–2018-06)"
 
 # ATE: mean TE across units (+ SE and 95% CI)
 df_eff <- df_est %>%
