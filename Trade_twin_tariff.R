@@ -128,13 +128,10 @@ trade_df <- panel(trade_df, panel.id = ~ unit_id + time_idx)
 m_iv <- feols(
   d_ln_milkp ~
     f(d_ln_alf, 0:K) +
-    f(d_ln_wheyq,0:K) +
-    f(d_ln_aqty,0:K) +
     interact_tra_trd + f(d_ln_fuel) + f(d_ln_faop) + f(covid) + i(month_fe) + i(year_fe) |
     f(d_ln_dqty) ~
     f(d_ln_tra,  0:K) +
-    f(d_ln_trd,  0:K) +
-    f(d_ln_dair, 0:K) ,
+    f(d_ln_trd,  0:K) + ,
   data = trade_df,
   panel.id = ~ unit_id + time_idx
 )
