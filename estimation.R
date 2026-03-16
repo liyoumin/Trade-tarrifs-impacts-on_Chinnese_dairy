@@ -57,7 +57,7 @@ clean_df <- cn_m %>%
   left_join(alfalfa_long, by = c("year","month"))
 summary(clean_df)
 
-###describ of import qty and value
+### (1) describ of import qty, value and rate
 events <- tribble(
   ~start,        ~end,          ~label,
   as.Date("2018-01-01"), as.Date("2018-12-31"), "2018",
@@ -163,7 +163,7 @@ ggplot(clean_df, aes(x = date.x)) +
   )
 
 ### estimation
-### 1) tariff revenue calculation
+### 2) tariff revenue calculation and support tariff boost TR temporary 
 clean_df <- clean_df %>%
   mutate(
     TRd   = (tariff_rate_on_dairy/100) * dairy_value_usd,
@@ -201,7 +201,7 @@ ggplot(clean_df, aes(x = date.x)) +
     axis.text.x = element_text(angle = 0, vjust = 0.5)
   )
 
-###co-variance
+###3. co-variance - correlation check
 vars <- clean_df[, c("alfalfa_price_usd_ton", "dairy_usd_per_kg", "tariff_rate_on_alfalfa",
                      "tariff_rate_on_dairy", "dairy_qty_ton", "qty_ton", "TRd", "TRa")]
 cov_matrix <- cov(vars, use = "complete.obs")
@@ -212,7 +212,7 @@ cor_matrix
 ancova_model <- aov(dairy_usd_per_kg ~ factor(tariff_rate_on_alfalfa) + alfalfa_price_usd_ton, data = clean_df)
 summary(ancova_model)
 
-###.   2) estimation model
+### estimation model
 clean_df <- clean_df %>%
   mutate(
     dairy_usd_per_ton = dairy_usd_per_kg * 1000
@@ -389,7 +389,7 @@ bind_rows(fs_a %>% mutate(tariff="Alfalfa tariff"),
   select(tariff, term, estimate, effect_on_milk)
 
 
-## sensitive test
+## 4) sensitive test - appendix B - placbo test ============================================
 # --- Minimal helpers that work with fixest + sensemakr -----------------------
 library(sensemakr)
 
@@ -715,7 +715,8 @@ p5 <- ggplot(dft, aes(x = window, y = avg_d_ln_milkp)) +
 p5 <- p5 + stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red")
 print(p5)
 
-###ATE
+#____________________________________________________________________________-
+### 5)ATT time serials interrupt
 # --- 1) Choose variables to analyze
 vars <- c("d_ln_dair", "d_ln_alf", "d_ln_dqty", "d_ln_aqty", "d_ln_milkp")
 var_labels <- c(
@@ -762,7 +763,7 @@ add_window <- function(df){
 
 control_lab <- "Control (2017-05–2018-06)"
 
-# ATE: mean TE across units (+ SE and 95% CI)
+# ATT: mean TE across units (+ SE and 95% CI)
 df_eff <- df_est %>%
   add_window() %>%
   dplyr::select(unit_id, window, month_lab, dplyr::all_of(vars)) %>%

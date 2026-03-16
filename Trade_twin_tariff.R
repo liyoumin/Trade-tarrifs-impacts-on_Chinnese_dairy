@@ -10,28 +10,39 @@ library(janitor)
 setwd("/Users/macpro/Desktop/Youmin-phd/research/Dairy and Alfalfa/China Figure")
 df <- read.csv("dairy_trade_data.csv")
 df$date <- as.Date(sprintf("%04d-%02d-01", df$Year, df$Month))
+eneragy <- read.csv("exchange_rate_and_fuel_price.csv")
+df$farmgate_usd_kg <- trade_df$farmgate_cny_kg * trade_df$usd_per_cny
+df$alfalfa_usd_kg <- trade_df$alfalfa_price_usd_ton/1000
 
+###add exchange rate. and fuel price
+eneragy <- eneragy %>%
+  mutate(date = as.Date(date, format = "%m/%d/%y"))
+
+df <- df %>%
+  mutate(date = as.Date(date, format = "%Y/%m/%d")) %>%
+  left_join(eneragy, by = "date")
 ##### variable creat
 trade_df <- df %>%
   arrange(date) %>%
   mutate(
     ln_feed = ifelse(feed_price_usd_ton + 1 > 0, log(feed_price_usd_ton), NA_real_),
-    ln_alf =  log(replace_na(alfalfa_price_usd_ton, 0) + 1),
+    ln_alf =  log(replace_na(alfalfa_usd_kg, 0) + 1),
+    ln_energy = log(replace_na(international_fuel_price_usd_per_barrel, 0) + 1),
     ln_dair = ifelse(dairy_usd_per_kg > 0, log(dairy_usd_per_kg), NA_real_),
     ln_dqty = ifelse(dairy_qty_ton + 1 > 0, log(dairy_qty_ton+1), NA_real_),
     ln_aqty = ifelse(alfalfa_qty+1 > 0, log(alfalfa_qty + 1), NA_real_), 
-    ln_milkp = log(replace_na(farmgate_cny_kg, 0) + 1),
+    ln_milkp = log(replace_na(farmgate_usd_kg, 0) + 1),
     ln_faop = ifelse(FAO_dairry_price_index > 0, log(FAO_dairry_price_index), NA_real_),
-    ln_tra = log(tariff_rate_on_alfalfa+1),
-    ln_trd = log(tariff_rate_on_dairy+1),
+    ln_tra = log((tariff_rate_on_alfalfa/100) +1),
+    ln_trd = log((tariff_rate_on_dairy/100)+1),
     ln_whey = log(whey_price),
     ln_whey_q = log(whey_qty),
     ###first difference
     d_ln_feed = ln_feed - lag(ln_feed),
     d_ln_alf = ln_alf - lag(ln_alf),
     d_ln_dair = ln_dair - lag(ln_dair),
-    d_tra = tariff_rate_on_alfalfa - lag(tariff_rate_on_alfalfa),
-    d_tra = tariff_rate_on_dairy - lag(tariff_rate_on_dairy),
+    d_tra = (tariff_rate_on_alfalfa - lag(tariff_rate_on_alfalfa))/100,
+    d_tra = (tariff_rate_on_dairy - lag(tariff_rate_on_dairy))/100,
     d_ln_tra = ln_tra -lag(ln_tra),
     d_ln_trd = ln_trd - lag(ln_trd), 
     d_ln_aqty = ln_aqty - lag(ln_aqty),
@@ -40,6 +51,7 @@ trade_df <- df %>%
     d_ln_wheyq = ln_whey - lag(ln_whey_q),
     d_ln_milkp = ln_milkp, - lag(ln_milkp),
     d_ln_faop = ln_faop - lag(ln_faop),
+    d_ln_fuel = ln_energy - lag(ln_energy),
     month_fe  = factor(Month), year_fe   = factor(Year)
   )
 K <-2
@@ -52,18 +64,31 @@ trade_df <- trade_df %>%
   ) %>%
   distinct(unit_id, date, .keep_all = TRUE)
 
+trade_df <- trade_df %>%
+  mutate(
+    # Interaction: alfalfa tariff × global dairy price competition
+    # When FAO dairy price is HIGH, imports are expensive → escape valve more closed
+    # (so alfalfa tariff bite should be LARGER when FAO price is high)
+    interact_tra_fao = d_ln_tra * d_ln_faop,
+    interact_tra_trd = d_ln_tra * d_ln_trd,
+  )
+trade_df$covid <- ifelse(
+  trade_df$date >= as.Date("2020-03-01") & trade_df$date <= as.Date("2021-06-01"),
+  1, 0
+)
 
-#### fixed effects model
-m1 <- feols(d_ln_wheyp ~ f(ln_tra,0:K) + f(ln_aqty, 0:K) + f(ln_trd,0:K) + f(ln_dqty,0:K) + f(ln_whey_q, 0:K) +
-              i(month_fe, "6") + i(year_fe),
+#### fixed effects model - whey price (3)
+m1 <- feols(d_ln_wheyp ~ f(d_ln_tra,0:K) + f(d_ln_aqty, 0:K) + f(d_ln_trd,0:K) + f(d_ln_dqty,0:K) + 
+              f(d_ln_dair, 0:K) + f(d_ln_faop,0:K) +
+             i(year_fe,"2018") + i(month_fe, "6") ,
             data = trade_df,
             panel.id = ~ unit_id + time_idx
 )
 summ_m1 <- summary(m1, vcov = NW(4))
 summ_m1
-## whey import qty
-m2 <- feols(d_ln_wheyq ~ f(d_ln_alf, 0:K) + f(d_ln_trd, 0:K)  + f(d_ln_tra, 0:K)  + 
-              i(month_fe, "6") + i(year_fe),
+## dairy import qty (1)
+m2 <- feols(d_ln_dqty ~ f(d_ln_trd, 0:K)  + f(d_ln_tra, 0:K)  + interact_tra_trd + f(d_ln_fuel) + covid +
+              i(month_fe) + i(year_fe),
             data = trade_df,
             panel.id = ~ unit_id + time_idx
 )
@@ -71,68 +96,15 @@ summ_m2 <- summary(m2, vcov = NW(4))
 summ_m2
 
 # IV: instrument feed dynamics with alfalfa tariff/world price
-# import qty
-m_3 <- feols(d_ln_dqty ~ f(d_ln_trd, 0:K) + f(d_ln_dair, 0:K) + f(d_ln_tra,0:K) 
-             + f(d_ln_dair, 0:K) +
-              i(month_fe, ref = "6") + i(year_fe),
+# import qty (1)
+m_3 <- feols(d_ln_dqty ~ f(d_ln_trd, 0:K) + f(d_ln_alf, 0:K) + f(d_ln_tra,0:K) 
+             + f(d_ln_dair, 0:K) + interact_tra_fao + interact_tra_trd + f(d_ln_fuel) +
+              i(month_fe) + i(year_fe),
             data = trade_df,
             panel.id = ~ unit_id + time_idx
 ) 
 summ_m3 <- summary(m_3, vcov = NW(4))
 summ_m3
-
-###2sls
-trade_df <- panel(trade_df, panel.id = ~ unit_id + time_idx)
-
-m_iv <- feols(
-  d_ln_milkp ~
-    f(d_ln_alf, 0:K) +
-    f(d_ln_wheyq,0:K) +
-    f(d_ln_aqty,0:K) +
-    i(month_fe, ref="6") +
-    i(year_fe,  ref="2018") |
-    f(d_ln_dqty) ~
-    f(d_ln_tra,  0:K) +
-    f(d_ln_trd,  0:K) +
-    f(d_ln_dair, 0:K) ,
-  data = trade_df
-)
-
-summary(m_iv)
-summary(m_iv, stage = 1)
-
-m4 <- feols(d_ln_milkp ~ f(d_ln_trd,0:K) + f(d_ln_tra,0:K) + 
-            + f(d_ln_aqty,0:K) + f(d_ln_dqty,0:K) +
-              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
-            data = trade_df,
-            panel.id = ~ unit_id + time_idx
-) 
-summ_m4 <- summary(m4, vcov = NW(4))
-summ_m4
-
-m5 <- feols(d_ln_alf ~ f(d_ln_trd,0:K) + f(d_ln_tra,0:K) + 
-              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
-            data = trade_df,
-            panel.id = ~ unit_id + time_idx
-) 
-summ_m5 <- summary(m5, vcov = NW(4))
-summ_m5
-
-m6 <- feols(d_ln_milkp ~ f(d_ln_alf, 0:K) +
-              f(d_ln_wheyq,0:K) +
-              f(d_ln_aqty,0:K) + f(d_ln_dqty,0:K) +
-              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
-            data = trade_df,
-            panel.id = ~ unit_id + time_idx
-) 
-summ_m6 <- summary(m6, vcov = NW(4))
-summ_m6
-### after 2017
-trade_df17 <- trade_df %>%
-  filter(date >= as.Date("2017-01-01"))
-trade_df17 <- trade_df %>%
-  filter(date >= as.Date("2017-01-01")) %>%
-  panel(panel.id = ~ unit_id + time_idx)
 
 m_iv1 <- feols(
   d_ln_milkp ~
@@ -150,8 +122,187 @@ m_iv1 <- feols(
 summary(m_iv1)
 summary(m_iv1, stage = 1)
 
-#### seperate IV
+###2sls (2)
+trade_df <- panel(trade_df, panel.id = ~ unit_id + time_idx)
 
+m_iv <- feols(
+  d_ln_milkp ~
+    f(d_ln_alf, 0:K) +
+    f(d_ln_wheyq,0:K) +
+    f(d_ln_aqty,0:K) +
+    interact_tra_trd + f(d_ln_fuel) + f(d_ln_faop) + f(covid) + i(month_fe) + i(year_fe) |
+    f(d_ln_dqty) ~
+    f(d_ln_tra,  0:K) +
+    f(d_ln_trd,  0:K) +
+    f(d_ln_dair, 0:K) ,
+  data = trade_df,
+  panel.id = ~ unit_id + time_idx
+)
+
+summary(m_iv)
+summary(m_iv, stage = 1)
+
+
+### appendix B. (1)
+rf_mm <- feols(d_ln_milkp ~ f(d_ln_trd,0:K) + f(d_ln_tra, 0:K) + f(d_ln_fuel) + covid +
+              i(year_fe) + i(month_fe),
+            data = trade_df,
+            panel.id = ~ unit_id + time_idx
+) 
+rf_mm <- summary(rf_mm, vcov = NW(4))
+rf_mm
+
+# Reduced form WITH interaction (replaces rf_mm in existing code) - appendix B. (2)
+rf_interact <- feols(
+  d_ln_milkp ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) + f(d_ln_dair,0:K) +
+    interact_tra_trd + covid + f(d_ln_fuel) + 
+    i(month_fe) + i(year_fe),
+  data = trade_est,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+
+# Compare: reduced form without vs. with interaction
+etable(rf_mm, rf_interact, se = "hetero", depvar = TRUE,
+       title = "Twin Tariff Interaction Test")
+
+m5 <- feols(d_ln_alf ~ f(d_ln_trd,0:K) + f(d_ln_tra,0:K) + 
+              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
+            data = trade_df,
+            panel.id = ~ unit_id + time_idx
+) 
+summ_m5 <- summary(m5, vcov = NW(4))
+summ_m5
+
+# Run the same reduced-form spec with margin as outcome - appendix b(3)
+rf_margin <- feols(
+  (d_ln_milkp - d_ln_alf) ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) + covid + f(d_ln_fuel) +
+    i(month_fe) + i(year_fe),
+  data = trade_df,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+etable(rf_mm, rf_margin, se = "hetero", depvar = TRUE,
+       title = "Twin Tariff Effects: Milk Price vs. Margin")
+
+
+m6 <- feols(d_ln_milkp ~ f(d_ln_alf, 0:K) +
+              f(d_ln_wheyq,0:K) +
+              f(d_ln_aqty,0:K) + f(d_ln_dqty,0:K) +
+              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
+            data = trade_df,
+            panel.id = ~ unit_id + time_idx
+) 
+summ_m6 <- summary(m6, vcov = NW(4))
+summ_m6
+
+### after 2017 APpendix A (fig 14-16)
+trade_df17 <- trade_df %>%
+  filter(date >= as.Date("2017-01-01"))
+trade_df17 <- trade_df %>%
+  filter(date >= as.Date("2017-01-01")) %>%
+  panel(panel.id = ~ unit_id + time_idx)
+
+
+# Build indexed series
+base_date <- as.Date("2017-01-01")
+index_df <- trade_df %>%
+  filter(!is.na(alfalfa_usd_kg), !is.na(farmgate_usd_kg)) %>%
+  mutate(
+    # Index to 100 at base period average
+    base_alf = mean(alfalfa_usd_kg[date < as.Date("2018-01-01")], na.rm=TRUE),
+    base_milk = mean(farmgate_usd_kg[date < as.Date("2018-01-01")], na.rm=TRUE),
+    idx_alf = 100 * alfalfa_usd_kg / base_alf,
+    idx_milk = 100 * farmgate_usd_kg / base_milk,
+    idx_margin = idx_milk - idx_alf # scissors gap
+  )
+
+### scissor fig appendix A fig.15
+ggplot(index_df, aes(x = date)) +
+  geom_line(aes(y = idx_alf, color = "Alfalfa CIF price (indexed)"), linewidth = 0.8) +
+  geom_line(aes(y = idx_milk, color = "Farm-gate milk price (indexed)"), linewidth = 0.8) +
+  geom_hline(yintercept = 100, linetype = "dashed", alpha = 0.5) +
+  geom_vline(xintercept = as.Date("2018-06-01"), linetype = "dashed", alpha = 0.5) +
+  annotate("text", x = as.Date("2018-09-01"), y = 180,
+           label = "Tariff shock", hjust = 0, size = 3.5) +
+  scale_color_manual(values = c("Alfalfa CIF price (indexed)" = "#D95F02",
+                                "Farm-gate milk price (indexed)" = "#1B9E77")) +
+  labs(title = "The Scissors Effect: Input Cost vs. Output Price",
+       subtitle = "Both indexed to 100 at pre-tariff average (2017)",
+       x = NULL, y = "Index (pre-tariff = 100)", color = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "top")
+
+
+### Appendix fig 14-16
+# Define event time (months relative to first major tariff shock: July 2018)
+shock_date <- as.Date("2018-07-01")
+df_est <- trade_est %>%
+  mutate(
+    event_month = interval(shock_date, date) %/% months(1)
+  )
+# Keep a window of -18 to +36 months around the shock
+# (pre-period: 18 months before; post: 36 months after)
+df_event <- df_est %>%
+  filter(event_month >= -18, event_month <= 36)
+# Omit event_month = -1 as the reference period (one month before shock)
+df_event <- df_event %>%
+  mutate(event_month_f = factor(event_month))
+
+# Event study for milk price
+es_milk <- feols(
+  d_ln_milkp ~ i(event_month_f, ref = "-1") +
+    i(month_fe) + i(year_fe),
+  data = df_event,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+# Event study for alfalfa price (to verify the input channel)
+es_alf <- feols(
+  d_ln_alf ~ i(event_month_f, ref = "-1") +
+    i(month_fe) + i(year_fe),
+  data = df_event,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+# Event study for margin
+es_margin <- feols(
+  (d_ln_milkp - d_ln_alf) ~ i(event_month_f, ref = "-1") +
+    i(month_fe) + i(year_fe),
+  data = df_event,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+
+library(broom)
+plot_event_study <- function(model, title_text) {
+  tidy(model, conf.int = TRUE) %>%
+    filter(str_detect(term, "event_month_f::")) %>%
+    mutate(
+      t = as.integer(str_replace(term, "event_month_f::", "")),
+      significant = p.value < 0.1
+    ) %>%
+    ggplot(aes(x = t, y = estimate)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_vline(xintercept = 0, color = "red", linetype = "dashed", alpha = 0.6) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15) +
+    geom_line(linewidth = 0.8) +
+    geom_point(aes(fill = significant), shape = 21, size = 2) +
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "white"),
+                      guide = "none") +
+    annotate("text", x = 1, y = max(tidy(model)$estimate, na.rm=TRUE),
+             label = "Tariff shock →", hjust = 0, size = 3.5, color = "red") +
+    labs(title = title_text,
+         x = "Months relative to July 2018 tariff shock",
+         y = "Estimated coefficient (∆ log)",
+         caption = "Shaded band = 95% CI. Reference period = month -1.") +
+    theme_minimal(base_size = 13)
+}
+plot_event_study(es_milk, "Event Study: Farm-gate Milk Price")
+plot_event_study(es_alf, "Event Study: Alfalfa Import Price")
+plot_event_study(es_margin, "Event Study: Price-Cost Margin (Milk − Alfalfa)")
+
+#### seperate IV check
 m_iv2 <- feols(
   d_ln_milkp ~
     f(d_ln_aqty, 0:K) +
@@ -163,7 +314,8 @@ m_iv2 <- feols(
     f(d_ln_alf) ~
     f(d_ln_tra, 0:K) +
     f(d_ln_trd, 0:K),
-  data = trade_df
+  data = trade_df,
+  panel.id = ~ unit_id + time_idx
 )
 
 summary(m_iv2)
@@ -171,14 +323,14 @@ summary(m_iv2, stage = 1)
 
 m_iv3 <- feols(
   d_ln_milkp ~
-    f(d_ln_aqty, 0:K) +
     f(d_ln_dqty,0:K) +
     f(d_ln_wheyq,0:K) +
     i(month_fe, ref="6") +
     i(year_fe,  ref="2018") |
     f(d_ln_dair) ~
-    f(d_ln_trd,  0:K),
-  data = trade_df
+    f(d_ln_trd,  0:K)+ f(d_ln_tra,0:K),
+  data = trade_df,
+  panel.id = ~ unit_id + time_idx
 )
 
 summary(m_iv3)
@@ -200,3 +352,21 @@ m_iv4 <- feols(
 
 summary(m_iv4)
 summary(m_iv, stage = 1)
+
+
+df_est <- trade_df %>%
+  arrange(date) %>%
+  mutate(unit_id = 1L, time_idx = row_number()) %>%
+  distinct(unit_id, date, .keep_all = TRUE)
+# Escape valve test
+rf_escape <- feols(
+  d_ln_milkp ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) +
+    f(d_ln_faop, 0:2) +
+    interact_tra_fao +
+    i(month_fe) + i(year_fe),
+  data = trade_df,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+summary(rf_escape, vcov = "hetero")
+
