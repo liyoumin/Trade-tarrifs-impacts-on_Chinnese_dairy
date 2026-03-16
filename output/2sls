@@ -1,0 +1,176 @@
+
+
+###2sls (2)
+m_iv <- feols(
+  d_ln_milkp ~
+    f(d_ln_alf, 0:K) +
+    interact_tra_trd + f(d_ln_fuel) + f(d_ln_faop) + f(covid) + i(month_fe) + i(year_fe) |
+    f(d_ln_dqty) ~
+    f(d_ln_tra,  0:K) +
+    f(d_ln_trd,  0:K) + ,
+  data = trade_df,
+  panel.id = ~ unit_id + time_idx
+)
+
+summary(m_iv)
+summary(m_iv, stage = 1)
+
+
+### appendix B. (1)
+rf_mm <- feols(d_ln_milkp ~ f(d_ln_trd,0:K) + f(d_ln_tra, 0:K) + f(d_ln_fuel) + covid +
+              i(year_fe) + i(month_fe),
+            data = trade_df,
+            panel.id = ~ unit_id + time_idx
+) 
+rf_mm <- summary(rf_mm, vcov = NW(4))
+rf_mm
+
+# Reduced form WITH interaction (replaces rf_mm in existing code) - appendix B. (2)
+rf_interact <- feols(
+  d_ln_milkp ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) + f(d_ln_dair,0:K) +
+    interact_tra_trd + covid + f(d_ln_fuel) + 
+    i(month_fe) + i(year_fe),
+  data = trade_est,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+
+# Compare: reduced form without vs. with interaction
+etable(rf_mm, rf_interact, se = "hetero", depvar = TRUE,
+       title = "Twin Tariff Interaction Test")
+
+m5 <- feols(d_ln_alf ~ f(d_ln_trd,0:K) + f(d_ln_tra,0:K) + 
+              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
+            data = trade_df,
+            panel.id = ~ unit_id + time_idx
+) 
+summ_m5 <- summary(m5, vcov = NW(4))
+summ_m5
+
+# Run the same reduced-form spec with margin as outcome - appendix b(3)
+rf_margin <- feols(
+  (d_ln_milkp - d_ln_alf) ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) + covid + f(d_ln_fuel) +
+    i(month_fe) + i(year_fe),
+  data = trade_df,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+etable(rf_mm, rf_margin, se = "hetero", depvar = TRUE,
+       title = "Twin Tariff Effects: Milk Price vs. Margin")
+
+
+m6 <- feols(d_ln_milkp ~ f(d_ln_alf, 0:K) +
+              f(d_ln_wheyq,0:K) +
+              f(d_ln_aqty,0:K) + f(d_ln_dqty,0:K) +
+              i(month_fe, ref = "6") + i(year_fe, ref = "2018"),
+            data = trade_df,
+            panel.id = ~ unit_id + time_idx
+) 
+summ_m6 <- summary(m6, vcov = NW(4))
+summ_m6
+
+### after 2017 APpendix A (fig 14-16)
+trade_df17 <- trade_df %>%
+  filter(date >= as.Date("2017-01-01"))
+trade_df17 <- trade_df %>%
+  filter(date >= as.Date("2017-01-01")) %>%
+  panel(panel.id = ~ unit_id + time_idx)
+
+
+# Build indexed series
+base_date <- as.Date("2017-01-01")
+index_df <- trade_df %>%
+  filter(!is.na(alfalfa_usd_kg), !is.na(farmgate_usd_kg)) %>%
+  mutate(
+    # Index to 100 at base period average
+    base_alf = mean(alfalfa_usd_kg[date < as.Date("2018-01-01")], na.rm=TRUE),
+    base_milk = mean(farmgate_usd_kg[date < as.Date("2018-01-01")], na.rm=TRUE),
+    idx_alf = 100 * alfalfa_usd_kg / base_alf,
+    idx_milk = 100 * farmgate_usd_kg / base_milk,
+    idx_margin = idx_milk - idx_alf # scissors gap
+  )
+
+### scissor fig appendix A fig.15
+ggplot(index_df, aes(x = date)) +
+  geom_line(aes(y = idx_alf, color = "Alfalfa CIF price (indexed)"), linewidth = 0.8) +
+  geom_line(aes(y = idx_milk, color = "Farm-gate milk price (indexed)"), linewidth = 0.8) +
+  geom_hline(yintercept = 100, linetype = "dashed", alpha = 0.5) +
+  geom_vline(xintercept = as.Date("2018-06-01"), linetype = "dashed", alpha = 0.5) +
+  annotate("text", x = as.Date("2018-09-01"), y = 180,
+           label = "Tariff shock", hjust = 0, size = 3.5) +
+  scale_color_manual(values = c("Alfalfa CIF price (indexed)" = "#D95F02",
+                                "Farm-gate milk price (indexed)" = "#1B9E77")) +
+  labs(title = "The Scissors Effect: Input Cost vs. Output Price",
+       subtitle = "Both indexed to 100 at pre-tariff average (2017)",
+       x = NULL, y = "Index (pre-tariff = 100)", color = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "top")
+
+
+### Appendix fig 14-16
+# Define event time (months relative to first major tariff shock: July 2018)
+shock_date <- as.Date("2018-07-01")
+df_est <- trade_est %>%
+  mutate(
+    event_month = interval(shock_date, date) %/% months(1)
+  )
+# Keep a window of -18 to +36 months around the shock
+# (pre-period: 18 months before; post: 36 months after)
+df_event <- df_est %>%
+  filter(event_month >= -18, event_month <= 36)
+# Omit event_month = -1 as the reference period (one month before shock)
+df_event <- df_event %>%
+  mutate(event_month_f = factor(event_month))
+
+# Event study for milk price
+es_milk <- feols(
+  d_ln_milkp ~ i(event_month_f, ref = "-1") +
+    i(month_fe) + i(year_fe),
+  data = df_event,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+# Event study for alfalfa price (to verify the input channel)
+es_alf <- feols(
+  d_ln_alf ~ i(event_month_f, ref = "-1") +
+    i(month_fe) + i(year_fe),
+  data = df_event,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+# Event study for margin
+es_margin <- feols(
+  (d_ln_milkp - d_ln_alf) ~ i(event_month_f, ref = "-1") +
+    i(month_fe) + i(year_fe),
+  data = df_event,
+  panel.id = ~unit_id + time_idx,
+  vcov = "hetero"
+)
+
+library(broom)
+plot_event_study <- function(model, title_text) {
+  tidy(model, conf.int = TRUE) %>%
+    filter(str_detect(term, "event_month_f::")) %>%
+    mutate(
+      t = as.integer(str_replace(term, "event_month_f::", "")),
+      significant = p.value < 0.1
+    ) %>%
+    ggplot(aes(x = t, y = estimate)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_vline(xintercept = 0, color = "red", linetype = "dashed", alpha = 0.6) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15) +
+    geom_line(linewidth = 0.8) +
+    geom_point(aes(fill = significant), shape = 21, size = 2) +
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "white"),
+                      guide = "none") +
+    annotate("text", x = 1, y = max(tidy(model)$estimate, na.rm=TRUE),
+             label = "Tariff shock →", hjust = 0, size = 3.5, color = "red") +
+    labs(title = title_text,
+         x = "Months relative to July 2018 tariff shock",
+         y = "Estimated coefficient (∆ log)",
+         caption = "Shaded band = 95% CI. Reference period = month -1.") +
+    theme_minimal(base_size = 13)
+}
+plot_event_study(es_milk, "Event Study: Farm-gate Milk Price")
+plot_event_study(es_alf, "Event Study: Alfalfa Import Price")
+plot_event_study(es_margin, "Event Study: Price-Cost Margin (Milk − Alfalfa)")
