@@ -1,4 +1,3 @@
-### add whey data
 ### library(readxl); library(purrr); library(dplyr); library(janitor)
 library(readr)   # for parse_number
 library(ggplot2); library(lubridate); library(fixest) ;library(zoo)
@@ -14,14 +13,14 @@ eneragy <- read.csv("exchange_rate_and_fuel_price.csv")
 df$farmgate_usd_kg <- trade_df$farmgate_cny_kg * trade_df$usd_per_cny
 df$alfalfa_usd_kg <- trade_df$alfalfa_price_usd_ton/1000
 
-00 clean data ###add exchange rate. and fuel price
+## clean data ###add exchange rate. and fuel price
 eneragy <- eneragy %>%
   mutate(date = as.Date(date, format = "%m/%d/%y"))
 
 df <- df %>%
   mutate(date = as.Date(date, format = "%Y/%m/%d")) %>%
   left_join(eneragy, by = "date")
-##### variable creat
+#####1. lag variable creat
 trade_df <- df %>%
   arrange(date) %>%
   mutate(
@@ -64,6 +63,7 @@ trade_df <- trade_df %>%
   ) %>%
   distinct(unit_id, date, .keep_all = TRUE)
 
+### interact variables
 trade_df <- trade_df %>%
   mutate(
     # Interaction: alfalfa tariff × global dairy price competition
@@ -77,7 +77,7 @@ trade_df$covid <- ifelse(
   1, 0
 )
 
-01 fixed effects#### fixed effects model - whey price (3)
+#### 2. - fixed effects model - whey price (3)
 m1 <- feols(d_ln_wheyp ~ f(d_ln_tra,0:K) + f(d_ln_aqty, 0:K) + f(d_ln_trd,0:K) + f(d_ln_dqty,0:K) + 
               f(d_ln_dair, 0:K) + f(d_ln_faop,0:K) +
              i(year_fe,"2018") + i(month_fe, "6") ,
@@ -87,7 +87,7 @@ m1 <- feols(d_ln_wheyp ~ f(d_ln_tra,0:K) + f(d_ln_aqty, 0:K) + f(d_ln_trd,0:K) +
 summ_m1 <- summary(m1, vcov = NW(4))
 summ_m1
 
-01 - 1sls ## dairy import qty (1)
+## dairy import qty (1)
 m2 <- feols(d_ln_dqty ~ f(d_ln_trd, 0:K)  + f(d_ln_tra, 0:K)  + interact_tra_trd + f(d_ln_fuel) + covid +
               i(month_fe) + i(year_fe),
             data = trade_df,
@@ -123,7 +123,7 @@ m_iv1 <- feols(
 summary(m_iv1)
 summary(m_iv1, stage = 1)
 
-02 2SLS ###2sls (2)
+###2sls (2)
 trade_df <- panel(trade_df, panel.id = ~ unit_id + time_idx)
 
 m_iv <- feols(
@@ -141,7 +141,7 @@ summary(m_iv)
 summary(m_iv, stage = 1)
 
 
-03 Reduced form ### appendix B. (1)
+Reduced form ### appendix B. (1)
 rf_mm <- feols(d_ln_milkp ~ f(d_ln_trd,0:K) + f(d_ln_tra, 0:K) + f(d_ln_fuel) + covid +
               i(year_fe) + i(month_fe),
             data = trade_df,
@@ -150,7 +150,7 @@ rf_mm <- feols(d_ln_milkp ~ f(d_ln_trd,0:K) + f(d_ln_tra, 0:K) + f(d_ln_fuel) + 
 rf_mm <- summary(rf_mm, vcov = NW(4))
 rf_mm
 
-04 robust check interction form # Reduced form WITH interaction (replaces rf_mm in existing code) - appendix B. (2)
+### robust check interction form Reduced form WITH interaction (replaces rf_mm in existing code) - appendix B. (2)
 rf_interact <- feols(
   d_ln_milkp ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) + f(d_ln_dair,0:K) +
     interact_tra_trd + covid + f(d_ln_fuel) + 
@@ -172,7 +172,7 @@ m5 <- feols(d_ln_alf ~ f(d_ln_trd,0:K) + f(d_ln_tra,0:K) +
 summ_m5 <- summary(m5, vcov = NW(4))
 summ_m5
 
-04 robust check margin price - cost # Run the same reduced-form spec with margin as outcome - appendix b(3)
+#### 04 robust check margin price - cost  Run the same reduced-form spec with margin as outcome - appendix b(3)
 rf_margin <- feols(
   (d_ln_milkp - d_ln_alf) ~ f(d_ln_tra, 0:2) + f(d_ln_trd, 0:2) + covid + f(d_ln_fuel) +
     i(month_fe) + i(year_fe),
@@ -202,7 +202,7 @@ trade_df17 <- trade_df %>%
   panel(panel.id = ~ unit_id + time_idx)
 
 
-04 robust check# Build indexed series
+### Build indexed series - 04 robust check
 base_date <- as.Date("2017-01-01")
 index_df <- trade_df %>%
   filter(!is.na(alfalfa_usd_kg), !is.na(farmgate_usd_kg)) %>%
@@ -232,7 +232,7 @@ ggplot(index_df, aes(x = date)) +
   theme(legend.position = "top")
 
 
-04 robust check ### Appendix fig 14-16
+### Appendix fig 14-16 - robust check 
 # Define event time (months relative to first major tariff shock: July 2018)
 shock_date <- as.Date("2018-07-01")
 df_est <- trade_est %>%
@@ -300,86 +300,7 @@ plot_event_study(es_milk, "Event Study: Farm-gate Milk Price")
 plot_event_study(es_alf, "Event Study: Alfalfa Import Price")
 plot_event_study(es_margin, "Event Study: Price-Cost Margin (Milk − Alfalfa)")
 
-
-05 ## 05) sensitive test - appendix B - placbo test ============================================
-# --- Minimal helpers that work with fixest + sensemakr -----------------------
-library(sensemakr)
-
-# Extract a robust t-stat for a named coefficient from a fixest model
-tstat_fixest <- function(mod, coef_name, se_type = c("hetero","iid","cluster","nw","dk")) {
-  se_type <- match.arg(se_type)
-  ss <- summary(mod, se = se_type)
-  ct <- ss$coeftable
-  if (is.null(ct) || !coef_name %in% rownames(ct)) {
-    stop(sprintf("Coefficient '%s' not found. Available:\n%s",
-                 coef_name, paste(rownames(ct), collapse = ", ")))
-  }
-  unname(ct[coef_name, "t value"])
-}
-
-# Core sensitivity readout for *one* coefficient
-sense_from_fixest <- function(mod, coef_name, se_type = "hetero",
-                              alpha = 0.05, q = 1) {
-  tval <- tstat_fixest(mod, coef_name, se_type = se_type)
-  dof  <- df.residual(mod)  # residual DoF from fixest
-  est  <- unname(coef(mod)[coef_name])
-  
-  # 1) Partial R^2 of treatment with outcome (conditional on included covariates)
-  pr2 <- sensemakr::partial_r2(t = tval, dof = dof)
-  
-  # 2) Robustness value RV_{q,alpha}
-  rv  <- sensemakr::robustness_value(t = tval, dof = dof, q = q, alpha = alpha)
-  
-  list(
-    coef      = coef_name,
-    estimate  = est,
-    t_value   = tval,
-    dof       = dof,
-    partial_R2= pr2,
-    RV_q_alpha= rv,
-    alpha     = alpha,
-    q         = q
-  )
-}
-
-# Convenience: run for all lags of a variable expanded by f(var, 0:K)
-sense_lag_bundle <- function(mod, var, K, se_type = "hetero", alpha = 0.05, q = 1) {
-  coefs <- paste0(var, "::", 0:K)
-  found <- intersect(coefs, names(coef(mod)))
-  if (length(found) == 0L) stop("No matching coefficients found in model.")
-  out <- lapply(found, \(nm) sense_from_fixest(mod, nm, se_type, alpha, q))
-  do.call(rbind, lapply(out, as.data.frame))
-}
-
-# Example: mm1, focus on contemporaneous d_ln_trd (lag 0)
-res_rf_mm1_tra0 <- sense_from_fixest(rf_mm1, coef_name = "f(d_ln_tra, 0)",
-                                  se_type = "hetero", alpha = 0.05, q = 1)
-res_rf_mm1_tra0
-
-sensemakr::partial_r2_from_model(rf_mm1, covariates = "f(d_ln_alf, 0)")
-sensemakr::partial_r2_from_model(rf_mm1, covariates = "f(d_ln_dair, 0)")
-
-res_mm1_trd0$RV_q_alpha
-
-# contemporaneous trade shock
-sense_from_fixest(mm1, "f(d_ln_trd, 0)", se_type = "hetero", q = 1, alpha = 0.05)
-sense_lag_bundle <- function(mod, var_prefix, K, se_type = "hetero", alpha = 0.05, q = 1) {
-  # Construct expected names like f(d_ln_trd, 0), f(d_ln_trd, 1), ...
-  coefs <- paste0("f(", var_prefix, ", ", 0:K, ")")
-  found <- intersect(coefs, names(coef(mod)))
-  if (length(found) == 0L)
-    stop("No matching coefficients found in model. Available:\n",
-         paste(names(coef(mod)), collapse = ", "))
-  
-  out <- lapply(found, function(nm)
-    sense_from_fixest(mod, nm, se_type = se_type, alpha = alpha, q = q))
-  do.call(rbind, lapply(out, as.data.frame))
-}
-
-sense_lag_bundle(mm1, "d_ln_trd", K, se_type = "hetero", q = 1, alpha = 0.05)
-sense_from_fixest(iv_mm1, "fit_d_ln_dqty", se_type = "hetero", q = 1, alpha = 0.05)
-
-06 ### 06) time serials interrupet
+### 06) time serials interrupet
 control_start <- as.Date("2017-01-01"); control_end <- as.Date("2018-06-01")
 war_start     <- as.Date("2018-06-01"); war_end     <- as.Date("2022-02-01")
 adjust_start   <- as.Date("2022-03-01"); adjust_end   <- as.Date("2023-09-01")
@@ -460,8 +381,8 @@ p5 <- p5 + stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color 
 print(p5)
 
 #____________________________________________________________________________-
-### 5)ATT time serials interrupt
-# --- 1) Choose variables to analyze
+### 6) time serials interrupt
+# --- 01) Choose variables to analyze
 vars <- c("d_ln_dair", "d_ln_alf", "d_ln_dqty", "d_ln_aqty", "d_ln_milkp")
 var_labels <- c(
   d_ln_dair = "Δ ln(dairy price)",
@@ -470,7 +391,7 @@ var_labels <- c(
   d_ln_aqty    = "Δ ln(alfalfa quantity)",
   d_ln_milkp   = "Δ ln(farm-gate milk price)"
 )
-# --- 2) Build month-of-year control baselines (per unit & month-of-year)
+# --- 02) Build month-of-year control baselines (per unit & month-of-year)
 base_long <- df_est %>%
   dplyr::filter(date.x >= as.Date("2017-01-01") & date.x < as.Date("2018-06-01")) %>%
   dplyr::mutate(month_lab = factor(lubridate::month(date.x, label = TRUE, abbr = TRUE),
@@ -479,7 +400,7 @@ base_long <- df_est %>%
   dplyr::summarise(dplyr::across(all_of(vars), ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
   tidyr::pivot_longer(cols = all_of(vars), names_to = "var", values_to = "base")
 
-# --- 3) Compute TE (per unit-month) and ATE (mean across units)
+# --- 03) Compute TE (per unit-month) and ATE (mean across units)
 # TE: value - (unit's control-period mean for same month-of-year)
 add_window <- function(df){
   df %>%
@@ -507,7 +428,7 @@ add_window <- function(df){
 
 control_lab <- "Control (2017-05–2018-06)"
 
-# ATT: mean TE across units (+ SE and 95% CI)
+### mean TE across units (+ SE and 95% CI)
 df_eff <- df_est %>%
   add_window() %>%
   dplyr::select(unit_id, window, month_lab, dplyr::all_of(vars)) %>%
@@ -521,14 +442,14 @@ df_te <- df_eff %>%
   dplyr::group_by(unit_id, window, month_lab, var) %>%
   dplyr::summarise(TE_plot = mean(TE_plot, na.rm = TRUE), .groups = "drop")
 
-df_ate <- df_te %>%
+df_te <- df_te %>%
   dplyr::group_by(window, month_lab, var) %>%
   dplyr::summarise(
     ATE  = mean(TE_plot, na.rm = TRUE),
     n    = sum(!is.na(TE_plot)),
     SE   = sd(TE_plot, na.rm = TRUE) / sqrt(pmax(n,1)),
-    CI_lo = ATE - 1.96*SE,
-    CI_hi = ATE + 1.96*SE,
+    CI_lo = TE - 1.96*SE,
+    CI_hi = TE + 1.96*SE,
     .groups = "drop"
   )
 
@@ -536,10 +457,10 @@ df_mean <- df_te %>%
   dplyr::group_by(window, var) %>%
   dplyr::summarise(win_mean = mean(TE_plot, na.rm = TRUE), .groups = "drop")
 
-# --- 4) Plot function: boxplots (TE) + ATE points with 95% CI
-plot_TE_ATE <- function(var_code){
+# --- 04) Plot function: boxplots (TE) + ATE points with 95% CI
+plot_TE_TE <- function(var_code){
   te_dat   <- dplyr::filter(df_te,  var == var_code)
-  ate_dat  <- dplyr::filter(df_ate, var == var_code)
+  ate_dat  <- dplyr::filter(df_te, var == var_code)
   win_mean <- dplyr::filter(df_mean, var == var_code)
   y_lab    <- var_labels[[var_code]]
   
@@ -557,7 +478,7 @@ plot_TE_ATE <- function(var_code){
     ) +
     geom_line(
       data = ate_dat,
-      aes(x = month_lab, y = ATE, group = 1),
+      aes(x = month_lab, y = TE, group = 1),
       linewidth = 0.5
     ) +
     geom_errorbar(
@@ -567,7 +488,7 @@ plot_TE_ATE <- function(var_code){
     ) +
     geom_point(
       data = ate_dat,
-      aes(x = month_lab, y = ATE),
+      aes(x = month_lab, y = TE),
       shape = 21, size = 2, stroke = 0.6, fill = "white"
     ) +
     facet_wrap(~ window, ncol = 2) +
@@ -587,17 +508,96 @@ plot_TE_ATE <- function(var_code){
     )
 }
 
-p_dair <- plot_TE_ATE("d_ln_dair")
-p_alf  <- plot_TE_ATE("d_ln_alf")
-p_dqty <- plot_TE_ATE("d_ln_dqty")
-p_aqty <- plot_TE_ATE("d_ln_aqty")
-p_milk <- plot_TE_ATE("d_ln_milkp")
+p_dair <- plot_TE_TE("d_ln_dair")
+p_alf  <- plot_TE_TE("d_ln_alf")
+p_dqty <- plot_TE_TE("d_ln_dqty")
+p_aqty <- plot_TE_TE("d_ln_aqty")
+p_milk <- plot_TE_TE("d_ln_milkp")
 print(p_dair)
 print(p_alf)
 print(p_dqty)
 print(p_aqty)
 print(p_milk)
 ggsave("TE_ATE_dairy_price.png", p_dair, width = 11, height = 6.5, dpi = 300)
+
+#### placebo test 05) sensitive test - appendix B - placbo test ============================================
+# --- Minimal helpers that work with fixest + sensemakr -----------------------
+library(sensemakr)
+
+# Extract a robust t-stat for a named coefficient from a fixest model
+tstat_fixest <- function(mod, coef_name, se_type = c("hetero","iid","cluster","nw","dk")) {
+  se_type <- match.arg(se_type)
+  ss <- summary(mod, se = se_type)
+  ct <- ss$coeftable
+  if (is.null(ct) || !coef_name %in% rownames(ct)) {
+    stop(sprintf("Coefficient '%s' not found. Available:\n%s",
+                 coef_name, paste(rownames(ct), collapse = ", ")))
+  }
+  unname(ct[coef_name, "t value"])
+}
+
+# Core sensitivity readout for *one* coefficient
+sense_from_fixest <- function(mod, coef_name, se_type = "hetero",
+                              alpha = 0.05, q = 1) {
+  tval <- tstat_fixest(mod, coef_name, se_type = se_type)
+  dof  <- df.residual(mod)  # residual DoF from fixest
+  est  <- unname(coef(mod)[coef_name])
+  
+  # 1) Partial R^2 of treatment with outcome (conditional on included covariates)
+  pr2 <- sensemakr::partial_r2(t = tval, dof = dof)
+  
+  # 2) Robustness value RV_{q,alpha}
+  rv  <- sensemakr::robustness_value(t = tval, dof = dof, q = q, alpha = alpha)
+  
+  list(
+    coef      = coef_name,
+    estimate  = est,
+    t_value   = tval,
+    dof       = dof,
+    partial_R2= pr2,
+    RV_q_alpha= rv,
+    alpha     = alpha,
+    q         = q
+  )
+}
+
+# Convenience: run for all lags of a variable expanded by f(var, 0:K)
+sense_lag_bundle <- function(mod, var, K, se_type = "hetero", alpha = 0.05, q = 1) {
+  coefs <- paste0(var, "::", 0:K)
+  found <- intersect(coefs, names(coef(mod)))
+  if (length(found) == 0L) stop("No matching coefficients found in model.")
+  out <- lapply(found, \(nm) sense_from_fixest(mod, nm, se_type, alpha, q))
+  do.call(rbind, lapply(out, as.data.frame))
+}
+
+# Example: mm1, focus on contemporaneous d_ln_trd (lag 0)
+res_rf_mm1_tra0 <- sense_from_fixest(rf_mm1, coef_name = "f(d_ln_tra, 0)",
+                                  se_type = "hetero", alpha = 0.05, q = 1)
+res_rf_mm1_tra0
+
+sensemakr::partial_r2_from_model(rf_mm1, covariates = "f(d_ln_alf, 0)")
+sensemakr::partial_r2_from_model(rf_mm1, covariates = "f(d_ln_dair, 0)")
+
+res_mm1_trd0$RV_q_alpha
+
+# contemporaneous trade shock
+sense_from_fixest(mm1, "f(d_ln_trd, 0)", se_type = "hetero", q = 1, alpha = 0.05)
+sense_lag_bundle <- function(mod, var_prefix, K, se_type = "hetero", alpha = 0.05, q = 1) {
+  # Construct expected names like f(d_ln_trd, 0), f(d_ln_trd, 1), ...
+  coefs <- paste0("f(", var_prefix, ", ", 0:K, ")")
+  found <- intersect(coefs, names(coef(mod)))
+  if (length(found) == 0L)
+    stop("No matching coefficients found in model. Available:\n",
+         paste(names(coef(mod)), collapse = ", "))
+  
+  out <- lapply(found, function(nm)
+    sense_from_fixest(mod, nm, se_type = se_type, alpha = alpha, q = q))
+  do.call(rbind, lapply(out, as.data.frame))
+}
+
+sense_lag_bundle(mm1, "d_ln_trd", K, se_type = "hetero", q = 1, alpha = 0.05)
+sense_from_fixest(iv_mm1, "fit_d_ln_dqty", se_type = "hetero", q = 1, alpha = 0.05)
+
 
                 
 ### longrun effects
