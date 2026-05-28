@@ -177,17 +177,4 @@ Notes:
 ## Research Summary
 
 The analysis supports the paper's twin-tariff argument: upstream input tariffs and downstream product tariffs should not be evaluated as isolated shocks when the commodities are vertically linked. In the Chinese dairy system, alfalfa tariffs operate through feed-cost pass-through, while dairy tariffs operate more through import substitution and quantity reallocation. The welfare code evaluates whether the joint regime generates losses larger than the sum of single-tariff counterfactuals and whether upstream support policies can reduce those losses.
-
-## Suggested Git Hygiene
-
-Before publishing to GitHub, consider adding a `.gitignore` with:
-
-```text
-.DS_Store
-._*
-.RData
-.Rhistory
-*.Rproj.user/
-```
-
-Keep raw public CSV files and reproducible scripts, but avoid committing local session artifacts.
+ 
