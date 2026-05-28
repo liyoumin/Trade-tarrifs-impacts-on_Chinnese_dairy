@@ -16,7 +16,7 @@ The core idea is a **twin-tariff** mechanism: an upstream alfalfa tariff can rai
 |-- 06_ecm.R                               # Cointegration and error-correction model checks
 |-- 07_sensitive_check.R                   # Leave-one-policy-month and sensitivity checks
 |-- 08_revision_extra_checks.R             # Revision checks: HAC, AR, ITS, lag robustness
-|-- dairy_trade_data.csv                   # Master monthly dataset
+|-- dairy_trade_data.csv                   # Monthly trade dataset from USDA-FAS-GATS, CALA.it
 |-- exchange_rate_and_fuel_price.csv       # FX and fuel controls
 |-- UN_comtrade_HS0401_0406.csv            # Raw/composite dairy import data by HS code
 |-- *_NZ_EU_*.csv                          # Alternative-origin dairy import data
