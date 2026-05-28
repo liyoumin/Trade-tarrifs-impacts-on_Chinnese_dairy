@@ -120,7 +120,7 @@ Generated robustness outputs are stored mainly in `outputs/robustness/` and `out
 This script uses `comtradr` if raw Comtrade data must be downloaded. To pull fresh data, set a Comtrade key in `.Renviron`:
 
 ```r
-COMTRADE_PRIMARY=your_key_here
+COMTRADE_PRIMARY= requested API
 ```
 
 If cached CSVs are already present, the workflow can reuse them instead of querying the API.
@@ -133,10 +133,10 @@ Important generated outputs include:
 | --- | --- |
 | `figure/tariff rate.png` | Applied tariff rates for U.S. alfalfa and dairy. |
 | `figure/Tariff revenue of both.png` | Estimated tariff revenue on U.S. alfalfa and dairy. |
-| `output/M2_IV_betaQ_table.csv` | IV estimates for the dairy-import quantity channel. |
-| `output/M3_cumulative_effects.csv` | Cumulative tariff effects and standard errors. |
-| `output/M3_joint_wald_tests.csv` | Joint Wald tests for lagged tariff effects. |
-| `output/M9_lag_length_robustness.csv` | Alternative lag-length estimates. |
+| `output/IV_betaQ_table.csv` | IV estimates for the dairy-import quantity channel. |
+| `output/cumulative_effects.csv` | Cumulative tariff effects and standard errors. |
+| `output/joint_wald_tests.csv` | Joint Wald tests for lagged tariff effects. |
+| `output/lag_length_robustness.csv` | Alternative lag-length estimates. |
 | `output/sensitivity_substitution_share.csv` | Welfare sensitivity to substitution assumptions. |
 | `output/welfare_table_2019_only_substitution_adjusted.csv` | Substitution-adjusted welfare table. |
 | `outputs/robustness/*.csv` | Appendix robustness outputs. |
@@ -153,7 +153,7 @@ source("05_figures.R")
 source("06_ecm.R")
 source("07_sensitive_check.R")
 source("08_revision_extra_checks.R")
-source("3_new_welfare_revised.R")
+source("03_new_welfare_revised.R")
 ```
 
 Recommended package set:
