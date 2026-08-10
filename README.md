@@ -16,7 +16,7 @@ The core idea is a **twin-tariff** mechanism: an upstream alfalfa tariff can rai
 |-- 06_ecm.R                               # Cointegration and error-correction model checks
 |-- 07_sensitive_check.R                   # Leave-one-policy-month and sensitivity checks
 |-- 08_revision_extra_checks.R             # Revision checks: HAC, AR, ITS, lag robustness
-|-- dairy_trade_data.csv                   # Monthly trade dataset from USDA-FAS-GATS, CALA.it
+|-- dairy_trade.csv                        # Monthly trade dataset from USDA-FAS-GATS, CALA.it, GACC
 |-- exchange_rate_and_fuel_price.csv       # FX and fuel controls
 |-- UN_comtrade_HS0401_0406.csv            # Raw/composite dairy import data by HS code
 |-- *_NZ_EU_*.csv                          # Alternative-origin dairy import data
@@ -32,7 +32,7 @@ The empirical dataset is monthly and primarily covers **January 2005 to November
 
 | File | Description |
 | --- | --- |
-| `dairy_trade_data.csv` | Master monthly series for U.S.-origin dairy quantities and values, alfalfa quantities and CIF unit values, tariffs, farm-gate milk prices, FAO dairy prices, and HS dairy aggregates. |
+| `dairy_trade.csv` | Monthly series for U.S.-origin dairy quantities and values, alfalfa quantities and CIF unit values, tariffs, farm-gate milk prices, FAO dairy prices, and HS dairy aggregates. |
 | `exchange_rate_and_fuel_price.csv` | CNY/USD exchange rates, USD/CNY conversion, international fuel price, and U.S. gasoline proxy variables. |
 | `UN_comtrade_HS0401_0406.csv` | UN Comtrade import records for China dairy products, HS 0401-0406. |
 | `dairy_imports_NZ_EU_monthly_by_HS0401_0406.csv` | Monthly dairy imports from New Zealand and EU origins by HS code. |
